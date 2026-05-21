@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import {
   Play, Info, Sparkles, BarChart3, Clapperboard, Film, 
   Plus, Check, Loader2, Shield, Zap, Globe, Headphones, 
-  Award, Home, Compass, Bookmark, ChevronRight, MonitorPlay
+  Award, Home, Compass, Bookmark, ChevronRight, MonitorPlay, Star
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/navbar/Navbar";
@@ -19,14 +19,15 @@ export default function LandingPage() {
 
   const [featuredMovie, setFeaturedMovie] = useState<any>(null);
   const [neuralPicks, setNeuralPicks] = useState<any[]>([]);
+  const [trendingMovies, setTrendingMovies] = useState<any[]>([]);
   const [myList, setMyList] = useState<any[]>([]);
   const [dynamicCategories, setDynamicCategories] = useState<any[]>([]);
   const [isFetching, setIsFetching] = useState(true);
 
   useEffect(() => {
     async function loadRealData() {
-      if (!user) { setIsFetching(false); return; }
       try {
+        // 1. FETCH PUBLIC DATA (Visible to everyone, even if not logged in)
         const moviesRef = collection(db, "movies");
         const moviesSnap = await getDocs(moviesRef);
         const allMovies: any[] = moviesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -35,10 +36,8 @@ export default function LandingPage() {
         if (sortedByViews.length > 0) {
           setFeaturedMovie(sortedByViews[0]);
           setNeuralPicks(sortedByViews.slice(1, 4)); 
+          setTrendingMovies(sortedByViews.slice(0, 10));
         }
-
-        const userDoc = await getDoc(doc(db, "users", user.uid));
-        if (userDoc.exists() && userDoc.data().myList) setMyList(userDoc.data().myList);
 
         const catSnap = await getDocs(collection(db, "categories"));
         const cats: any[] = catSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -51,13 +50,24 @@ export default function LandingPage() {
           };
         });
         setDynamicCategories(categoriesWithImages);
+
+        // 2. FETCH PRIVATE DATA (Only if the user is actually signed in)
+        if (user) {
+          const userDoc = await getDoc(doc(db, "users", user.uid));
+          if (userDoc.exists() && userDoc.data().myList) {
+            setMyList(userDoc.data().myList);
+          }
+        }
       } catch (error) {
-        console.error("Error:", error);
+        console.error("Error fetching data:", error);
       } finally {
         setIsFetching(false);
       }
     }
-    if (!loading) loadRealData();
+
+    if (!loading) {
+      loadRealData();
+    }
   }, [user, loading]);
 
   const toggleMyList = async (movie: any, e: React.MouseEvent) => {
@@ -89,6 +99,7 @@ export default function LandingPage() {
     <div className="min-h-screen w-full max-w-[100vw] bg-[#050505] text-zinc-50 font-sans selection:bg-red-900 selection:text-white overflow-x-hidden pb-20 md:pb-0">
       <Navbar />
 
+      {/* HERO SECTION */}
       <section className="relative h-[85vh] md:h-screen w-full flex items-center justify-center overflow-hidden px-4">
         <div className="absolute inset-0 z-0 bg-black">
           <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-black/50 to-[#050505]/80 z-10" />
@@ -105,7 +116,7 @@ export default function LandingPage() {
         <div className="relative z-40 text-center w-full max-w-5xl mt-0 md:mt-12 pointer-events-auto">
           <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1, ease: "easeOut" }}>
             <span className="inline-block py-1 px-3 rounded-full bg-red-600/10 border border-red-600/20 text-red-500 uppercase tracking-[0.3em] text-[9px] md:text-xs font-black mb-4 md:mb-6 shadow-[0_0_20px_rgba(220,38,38,0.2)]">
-              Welcome Back, {user?.displayName?.split(' ')[0] || "Aura Member"}
+              Welcome {user ? `Back, ${user.displayName?.split(' ')[0] || "Aura Member"}` : "to AURA"}
             </span>
             <h1 className="text-5xl sm:text-6xl md:text-8xl lg:text-[7rem] font-black tracking-tighter mb-4 md:mb-6 leading-[1.05] text-white drop-shadow-2xl">
               Limitless Stories.<br /> 
@@ -133,8 +144,57 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* FIREBASE TRENDING SECTION */}
+      {trendingMovies.length > 0 && (
+        <section className="w-full py-12 md:py-20 px-4 sm:px-8 lg:px-16 max-w-[1920px] mx-auto relative z-10 -mt-8 md:-mt-16 pointer-events-auto">
+          <div className="mb-6 md:mb-10 flex items-end justify-between">
+            <div>
+              <h2 className="text-2xl md:text-4xl font-extrabold text-white tracking-tight">
+                Trending on <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-red-800">AURA</span>
+              </h2>
+              <p className="text-zinc-400 mt-1 md:mt-2 text-xs md:text-sm font-medium">The most watched cinema this week.</p>
+            </div>
+          </div>
+
+          <div className="flex gap-4 md:gap-6 overflow-x-auto pb-8 snap-x snap-mandatory [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] w-full px-1">
+            {trendingMovies.map((movie) => (
+              <div 
+                key={movie.id} 
+                onClick={() => router.push(`/watch/${movie.slug || movie.id}`)}
+                className="group relative flex-none w-[240px] sm:w-[280px] md:w-[320px] aspect-[16/10] rounded-2xl overflow-hidden snap-start cursor-pointer border border-white/5 bg-zinc-900 shadow-xl transition-all duration-500 hover:-translate-y-2 hover:shadow-[0_20px_40px_-15px_rgba(220,38,38,0.2)] hover:border-red-500/30"
+              >
+                <img 
+                  src={movie.banner || movie.poster || "https://images.unsplash.com/photo-1485846234645-a62644f84728?q=80"} 
+                  alt={movie.title} 
+                  className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-80 group-hover:opacity-100"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-transparent transition-opacity duration-500" />
+
+                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 backdrop-blur-[2px]">
+                  <div className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-red-600/90 backdrop-blur-md flex items-center justify-center scale-75 group-hover:scale-100 transition-all duration-300 shadow-[0_0_30px_rgba(220,38,38,0.5)]">
+                    <Play className="w-5 h-5 md:w-6 md:h-6 text-white fill-white ml-1" />
+                  </div>
+                </div>
+
+                <div className="absolute bottom-0 left-0 w-full p-4 md:p-6 translate-y-2 group-hover:translate-y-0 transition-transform duration-300">
+                  <h3 className="text-lg md:text-xl font-bold text-white mb-1.5 truncate">{movie.title}</h3>
+                  <div className="flex items-center gap-3 text-[10px] md:text-xs font-semibold text-zinc-300">
+                    <span className="flex items-center gap-1 text-amber-500">
+                      <Star className="w-3 h-3 md:w-3.5 md:h-3.5 fill-amber-500" /> {movie.rating || "9.5"}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-sm bg-white/10 backdrop-blur-md">{movie.quality || "4K HDR"}</span>
+                    <span className="px-2 py-0.5 rounded-sm bg-red-500/20 text-red-400 border border-red-500/30">#{trendingMovies.indexOf(movie) + 1} Trending</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* FEATURED PREMIERE SECTION */}
       {featuredMovie && (
-        <section className="py-12 md:py-24 px-4 sm:px-8 lg:px-16 w-full max-w-[1920px] mx-auto relative z-30 -mt-12 md:-mt-24 pointer-events-auto">
+        <section className="py-12 md:py-24 px-4 sm:px-8 lg:px-16 w-full max-w-[1920px] mx-auto relative z-30 pointer-events-auto">
           <div className="mb-6 md:mb-10 flex items-end justify-between">
             <div>
               <h2 className="text-2xl md:text-5xl font-black tracking-tight mb-1 md:mb-2 text-white">Aura Premiere</h2>
@@ -143,7 +203,7 @@ export default function LandingPage() {
           </div>
 
           <div className="relative group w-full">
-            <div className="absolute -inset-1 bg-gradient-to-r from-red-600 to-purple-600 rounded-[2rem] md:rounded-[3rem] blur-2xl opacity-0 group-hover:opacity-30 transition duration-1000 hidden md:block" />
+            <div className="absolute -inset-1 bg-gradient-to-r from-red-600 to-amber-600 rounded-[2rem] md:rounded-[3rem] blur-2xl opacity-0 group-hover:opacity-20 transition duration-1000 hidden md:block" />
             
             <div className="relative rounded-2xl md:rounded-[2.5rem] overflow-hidden aspect-[4/5] sm:aspect-video md:aspect-[21/9] border border-white/10 shadow-2xl w-full bg-zinc-900">
               <div className="absolute inset-0 bg-gradient-to-t md:bg-gradient-to-r from-[#050505] via-[#050505]/80 md:via-[#050505]/50 to-transparent z-10 transition-opacity duration-500" />
@@ -176,6 +236,7 @@ export default function LandingPage() {
         </section>
       )}
 
+      {/* CATEGORIES SECTION */}
       <section className="py-8 md:py-16 px-4 sm:px-8 lg:px-16 w-full max-w-[1920px] mx-auto">
         <div className="flex items-end justify-between mb-6 md:mb-10">
           <h2 className="text-xl md:text-4xl font-black tracking-tight text-white">Trending Categories</h2>
@@ -195,6 +256,7 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* MY LIST SECTION (Only shown if user is logged in and has items) */}
       {myList.length > 0 && (
         <section className="py-8 md:py-16 px-4 sm:px-8 lg:px-16 w-full max-w-[1920px] mx-auto border-t border-white/5 mt-4 md:mt-10">
           <h2 className="text-xl md:text-4xl font-black tracking-tight mb-6 md:mb-10 text-white">My List</h2>
@@ -217,6 +279,7 @@ export default function LandingPage() {
         </section>
       )}
 
+      {/* DISCOVERY SECTION */}
       <section className="py-16 md:py-32 px-4 sm:px-8 lg:px-16 w-full relative overflow-hidden mt-8">
         <div className="absolute inset-0 bg-[#0A0A0A] border-y border-white/5" />
         <div className="max-w-[1920px] mx-auto w-full relative z-10 grid lg:grid-cols-2 gap-12 md:gap-20 items-center">
@@ -267,6 +330,7 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* FOOTER */}
       <section className="py-16 md:py-32 px-4 sm:px-8 lg:px-16 w-full max-w-[1920px] mx-auto">
         <div className="text-center max-w-4xl mx-auto mb-12 md:mb-20">
           <h2 className="text-3xl md:text-5xl font-black mb-4 md:mb-6 text-white tracking-tight">Empowering Independent Studios</h2>
