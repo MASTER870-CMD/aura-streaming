@@ -1,5 +1,5 @@
 import { Metadata } from 'next';
-import { doc, getDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 interface LayoutProps {
@@ -8,30 +8,46 @@ interface LayoutProps {
 }
 
 export async function generateMetadata({ params }: LayoutProps): Promise<Metadata> {
-  // 2. AWAIT the params before trying to read the ID
   const resolvedParams = await params;
   const routeId = resolvedParams?.id;
+  const baseUrl = "https://aura-streaming.vercel.app";
   
   let title = "Aura | Premium Streaming";
   let description = "Stream premium cinematic content on Aura.";
   let images = ["https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80"];
+  let canonicalId = routeId;
+  let keywords = ["AURA", "movie streaming", "premium streaming", "watch movies online"];
 
-  // 3. Safety check: If the ID is missing, return the default SEO
   if (!routeId) {
     return { title, description };
   }
 
   try {
-    const directDocRef = doc(db, "movies", routeId);
-    const directDocSnap = await getDoc(directDocRef);
+    let movieDoc = await getDoc(doc(db, "movies", routeId));
 
-    if (directDocSnap.exists()) {
-      const data = directDocSnap.data();
-      title = `${data.title} - Watch Full Movie on AURA`;
+    if (!movieDoc.exists()) {
+      const slugQuery = query(collection(db, "movies"), where("slug", "==", routeId));
+      const slugSnapshot = await getDocs(slugQuery);
+      if (!slugSnapshot.empty) {
+        movieDoc = slugSnapshot.docs[0];
+        canonicalId = slugSnapshot.docs[0].id;
+      }
+    }
+
+    if (movieDoc.exists()) {
+      const data = movieDoc.data();
+      const year = data.releaseYear || new Date().getFullYear();
+      title = `Watch ${data.title} (${year}) | AURA Premium`;
       description = data.fullDescription || data.shortDescription || description;
       if (data.banner || data.poster) {
         images = [data.banner || data.poster];
       }
+      keywords = [
+        `Watch ${data.title}`,
+        `${data.title} streaming`,
+        `${data.title} 8K`,
+        "Aura network",
+      ];
     }
   } catch (err) {
     console.error("Error generating dynamic metadata:", err);
@@ -40,9 +56,11 @@ export async function generateMetadata({ params }: LayoutProps): Promise<Metadat
   return {
     title,
     description,
+    keywords,
     openGraph: {
-      title,
+      title: title.toString(),
       description,
+      url: `${baseUrl}/watch/${canonicalId || routeId}`,
       images,
       type: 'video.movie',
       siteName: 'AURA',

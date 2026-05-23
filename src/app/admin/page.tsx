@@ -6,7 +6,8 @@ import imageCompression from "browser-image-compression";
 import {
   LayoutDashboard, Film, UploadCloud, Tags, Users, Menu,
   Trash2, Eye, Clock, Image as ImageIcon, Loader2, AlertCircle, 
-  Video, Plus, X, Type, Clapperboard, MonitorPlay, Search, Star, Zap, Edit
+  Video, Plus, X, Type, Clapperboard, MonitorPlay, Search, Star, Zap, Edit,
+  Link as LinkIcon, Info
 } from "lucide-react";
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, serverTimestamp, query, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -48,7 +49,6 @@ export default function AdminDashboard() {
 
   return (
     <div className="flex h-screen bg-[#050505] text-zinc-100 font-sans overflow-hidden">
-      {/* SIDEBAR */}
       <aside className={`fixed lg:relative z-50 w-72 h-full bg-zinc-950 border-r border-white/5 flex flex-col transition-transform duration-300 ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
         <div className="p-8 border-b border-white/5 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -98,8 +98,6 @@ export default function AdminDashboard() {
   );
 }
 
-// --- DASHBOARD COMPONENTS ---
-
 function Stats({ movies, users }: any) {
   const totalViews = movies.reduce((acc: number, curr: any) => acc + (Number(curr.views) || 0), 0);
   const totalWatchHours = users.reduce((acc: number, curr: any) => acc + (Number(curr.watchHours) || 0), 0);
@@ -135,7 +133,6 @@ function NavBtn({ icon, label, active, onClick }: any) {
   );
 }
 
-// --- MOVIES TABLE (WITH EDIT, SEARCH, & MOBILE CARDS) ---
 function MoviesTable({ movies, refresh, categories }: any) {
   const [search, setSearch] = useState("");
   const [editingMovie, setEditingMovie] = useState<any>(null);
@@ -162,11 +159,9 @@ function MoviesTable({ movies, refresh, categories }: any) {
   const del = async (m: any) => {
     if(confirm(`WARNING: This will permanently delete '${m.title}' from your Database AND Google Drive. This cannot be undone. Continue?`)) {
       try {
-        // 1. Delete from Google Drive to save storage space
         if (m.driveId && m.driveId !== "uploaded_id") {
           await fetch(`/api/upload?driveId=${m.driveId}`, { method: 'DELETE' });
         }
-        // 2. Delete from Database
         await deleteDoc(doc(db, "movies", m.id));
         refresh();
       } catch (err) {
@@ -180,7 +175,6 @@ function MoviesTable({ movies, refresh, categories }: any) {
       <div className="p-6 md:p-8 border-b border-white/5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0">
         <h2 className="text-xl md:text-2xl font-black text-white">Content Library</h2>
         
-        {/* Search Bar */}
         <div className="relative w-full md:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
           <input 
@@ -194,8 +188,6 @@ function MoviesTable({ movies, refresh, categories }: any) {
       </div>
 
       <div className="overflow-y-auto custom-scrollbar flex-1 p-4 md:p-0">
-        
-        {/* MOBILE VIEW (Cards) */}
         <div className="md:hidden flex flex-col gap-4">
           {filteredMovies.map((m: any) => (
             <div key={m.id} className="bg-zinc-900/50 border border-white/5 rounded-xl p-4 flex flex-col gap-4">
@@ -215,7 +207,6 @@ function MoviesTable({ movies, refresh, categories }: any) {
           ))}
         </div>
 
-        {/* DESKTOP VIEW (Table) */}
         <table className="w-full text-left hidden md:table">
           <thead className="text-[10px] uppercase font-black text-zinc-600 bg-black/20 sticky top-0 z-10 backdrop-blur-md">
             <tr><th className="p-6">Movie</th><th className="p-6">Category</th><th className="p-6">Visibility</th><th className="p-6 text-right">Actions</th></tr>
@@ -228,6 +219,7 @@ function MoviesTable({ movies, refresh, categories }: any) {
                   <div>
                     <p className="font-bold text-white">{m.title}</p>
                     <p className="text-xs text-zinc-500 mt-1">{m.releaseYear} • {m.duration || "N/A"}</p>
+                    {m.videoUrl && <span className="text-[9px] text-blue-400 mt-1 block">External Link</span>}
                   </div>
                 </td>
                 <td className="p-6"><span className="px-3 py-1 bg-zinc-900 border border-white/5 rounded-full text-xs text-zinc-300">{m.category}</span></td>
@@ -253,7 +245,6 @@ function MoviesTable({ movies, refresh, categories }: any) {
         )}
       </div>
 
-      {/* EDIT MODAL */}
       <AnimatePresence>
         {editingMovie && (
           <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -274,6 +265,16 @@ function MoviesTable({ movies, refresh, categories }: any) {
                   <select name="category" value={editingMovie.category} onChange={handleEditChange} className="w-full bg-black/50 border border-white/10 p-3 rounded-lg text-sm text-white outline-none focus:border-red-500">
                     {categories.map((c:any) => <option key={c.id} value={c.name}>{c.name}</option>)}
                   </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Direct Video Stream URL</label>
+                  <input name="videoUrl" value={editingMovie.videoUrl || ""} onChange={handleEditChange} placeholder="e.g. https://s01.../1080p/1080p.m3u8" className="w-full bg-black/50 border border-white/10 p-3 rounded-lg text-sm text-white outline-none focus:border-blue-500" />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Direct Audio Stream URL (Optional)</label>
+                  <input name="audioUrl" value={editingMovie.audioUrl || ""} onChange={handleEditChange} placeholder="e.g. https://s01.../a/0/0.m3u8" className="w-full bg-black/50 border border-white/10 p-3 rounded-lg text-sm text-white outline-none focus:border-blue-500" />
                 </div>
 
                 <div className="space-y-1">
@@ -303,7 +304,6 @@ function MoviesTable({ movies, refresh, categories }: any) {
   );
 }
 
-// --- USERS TABLE (WITH SEARCH & MOBILE CARDS) ---
 function UsersTable({ users, refresh }: any) {
   const [search, setSearch] = useState("");
   const [selectedUser, setSelectedUser] = useState<any>(null);
@@ -338,8 +338,6 @@ function UsersTable({ users, refresh }: any) {
       </div>
 
       <div className="overflow-y-auto custom-scrollbar flex-1 p-4 md:p-0">
-        
-        {/* MOBILE CARDS */}
         <div className="md:hidden flex flex-col gap-4">
            {filteredUsers.map((u: any) => (
               <div key={u.id} className="bg-zinc-900/50 border border-white/5 rounded-xl p-4 flex items-center justify-between gap-4">
@@ -355,7 +353,6 @@ function UsersTable({ users, refresh }: any) {
            ))}
         </div>
 
-        {/* DESKTOP TABLE */}
         <table className="w-full text-left hidden md:table">
           <thead className="text-[10px] uppercase font-black text-zinc-600 bg-black/20 sticky top-0">
             <tr><th className="p-6">User</th><th className="p-6">Email</th><th className="p-6 text-right">Action</th></tr>
@@ -375,7 +372,6 @@ function UsersTable({ users, refresh }: any) {
         </table>
       </div>
 
-      {/* USER DETAIL MODAL */}
       <AnimatePresence>
         {selectedUser && (
           <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSelectedUser(null)}>
@@ -415,8 +411,10 @@ function UsersTable({ users, refresh }: any) {
   );
 }
 
-// --- UPLOAD FORM (RESTORED ALL FIELDS FULLY) ---
 function UploadForm({ categories, isUploading, setIsUploading, progress, setProgress, error, setError, onSuccess }: any) {
+  // CRITICAL FEATURE: DUAL UPLOAD MODE
+  const [uploadMode, setUploadMode] = useState<"drive" | "link">("drive");
+  
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [poster, setPoster] = useState<string>("");
   const [banner, setBanner] = useState<string>("");
@@ -425,7 +423,7 @@ function UploadForm({ categories, isUploading, setIsUploading, progress, setProg
     title: "", slug: "", category: "", language: "", releaseYear: "",
     duration: "", quality: "1080p", shortDescription: "", fullDescription: "",
     seoTitle: "", seoDescription: "", seoKeywords: "", cast: "", director: "",
-    trailerUrl: "", isFeatured: false, isTrending: false
+    trailerUrl: "", videoUrl: "", audioUrl: "", isFeatured: false, isTrending: false
   });
 
   useEffect(() => {
@@ -454,49 +452,70 @@ function UploadForm({ categories, isUploading, setIsUploading, progress, setProg
   };
 
   const upload = async () => {
-    if (!videoFile || !formData.title || !poster || !formData.category) return setError("Missing required fields.");
+    if (uploadMode === "drive" && !videoFile) return setError("Please select a video file for Drive upload.");
+    if (uploadMode === "link" && !formData.videoUrl) return setError("Please provide a direct external video URL.");
+    if (!formData.title || !poster || !formData.category) return setError("Missing required fields (Title, Category, Poster).");
+
     setIsUploading(true); setProgress(0); setError(null);
 
     try {
-      const initRes = await fetch("/api/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: formData.title, description: formData.shortDescription || "Aura Admin",
-          mimeType: videoFile.type || "video/mp4", size: videoFile.size
-        })
-      });
+      let finalDriveId = null;
 
-      if (!initRes.ok) throw new Error("Failed to initialize Google Drive session.");
-      const { uploadUrl } = await initRes.json();
-      if (!uploadUrl) throw new Error("No secure upload URL returned.");
+      // MODE 1: HEAVY GOOGLE DRIVE UPLOAD
+      if (uploadMode === "drive") {
+        const initRes = await fetch("/api/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: formData.title, description: formData.shortDescription || "Aura Admin",
+            mimeType: videoFile!.type || "video/mp4", size: videoFile!.size
+          })
+        });
 
-      const CHUNK_SIZE = 10 * 1024 * 1024; 
-      let start = 0;
-      let driveResponseData = null;
+        if (!initRes.ok) throw new Error("Failed to initialize Google Drive session.");
+        const { uploadUrl } = await initRes.json();
+        if (!uploadUrl) throw new Error("No secure upload URL returned.");
 
-      while (start < videoFile.size) {
-        const end = Math.min(start + CHUNK_SIZE, videoFile.size);
-        const chunk = videoFile.slice(start, end);
-        const chunkStartOffset = start;
+        const CHUNK_SIZE = 10 * 1024 * 1024; 
+        let start = 0;
+        let driveResponseData = null;
 
-        const uploadChunkWithRetry = () => new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open("PUT", uploadUrl, true);
-            xhr.setRequestHeader("Content-Range", `bytes ${chunkStartOffset}-${end - 1}/${videoFile.size}`);
-            xhr.setRequestHeader("Content-Type", videoFile.type || "video/mp4");
-            xhr.upload.onprogress = (e) => { if (e.lengthComputable) setProgress(Math.min(Math.round(((chunkStartOffset + e.loaded) / videoFile.size) * 100), 99)); };
-            xhr.onload = () => (xhr.status === 308 || xhr.status === 200 || xhr.status === 201) ? resolve(xhr.responseText) : reject(new Error(`Server error: ${xhr.status}`));
-            xhr.onerror = () => reject(new Error("Stream connection reset midway."));
-            xhr.send(chunk);
-          });
+        while (start < videoFile!.size) {
+          const end = Math.min(start + CHUNK_SIZE, videoFile!.size);
+          const chunk = videoFile!.slice(start, end);
+          const chunkStartOffset = start;
 
-        const responseText = await uploadChunkWithRetry() as string;
-        if (end === videoFile.size && responseText) { try { driveResponseData = JSON.parse(responseText); } catch (_) {} }
-        start = end;
+          const uploadChunkWithRetry = () => new Promise((resolve, reject) => {
+              const xhr = new XMLHttpRequest();
+              xhr.open("PUT", uploadUrl, true);
+              xhr.setRequestHeader("Content-Range", `bytes ${chunkStartOffset}-${end - 1}/${videoFile!.size}`);
+              xhr.setRequestHeader("Content-Type", videoFile!.type || "video/mp4");
+              xhr.upload.onprogress = (e) => { if (e.lengthComputable) setProgress(Math.min(Math.round(((chunkStartOffset + e.loaded) / videoFile!.size) * 100), 99)); };
+              xhr.onload = () => (xhr.status === 308 || xhr.status === 200 || xhr.status === 201) ? resolve(xhr.responseText) : reject(new Error(`Server error: ${xhr.status}`));
+              xhr.onerror = () => reject(new Error("Stream connection reset midway."));
+              xhr.send(chunk);
+            });
+
+          const responseText = await uploadChunkWithRetry() as string;
+          if (end === videoFile!.size && responseText) { try { driveResponseData = JSON.parse(responseText); } catch (_) {} }
+          start = end;
+        }
+        finalDriveId = driveResponseData?.id || "uploaded_id";
       }
 
-      await addDoc(collection(db, "movies"), { ...formData, driveId: driveResponseData?.id || "uploaded_id", poster, banner: banner || poster, status: "Published", views: 0, createdAt: serverTimestamp() });
+      // MODE 2: INSTANT LINK SAVE (Works for both Drive and Link modes)
+      await addDoc(collection(db, "movies"), { 
+        ...formData, 
+        driveId: finalDriveId, // Will be null if using external link
+        videoUrl: uploadMode === "link" ? formData.videoUrl : null,
+        audioUrl: uploadMode === "link" ? formData.audioUrl : null, // Added the new audio field!
+        poster, 
+        banner: banner || poster, 
+        status: "Published", 
+        views: 0, 
+        createdAt: serverTimestamp() 
+      });
+
       setProgress(100); setIsUploading(false); onSuccess();
 
     } catch (err: any) { setError(`Process Failed: ${err.message}`); setIsUploading(false); }
@@ -507,7 +526,7 @@ function UploadForm({ categories, isUploading, setIsUploading, progress, setProg
       <div className="mb-6 md:mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-4xl font-black text-white tracking-tight">Content Ingestion</h1>
-          <p className="text-xs md:text-sm text-zinc-500 mt-1 md:mt-2">Upload master files and configure platform metadata.</p>
+          <p className="text-xs md:text-sm text-zinc-500 mt-1 md:mt-2">Upload master files or bind external URLs.</p>
         </div>
         <button onClick={upload} disabled={isUploading} className="w-full md:w-auto px-6 py-3 md:px-8 md:py-4 bg-red-600 text-white rounded-xl md:rounded-2xl font-black uppercase tracking-widest hover:bg-red-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
           {isUploading ? <><Loader2 className="animate-spin" size={18}/> {progress}%</> : <><UploadCloud size={18}/> Publish Movie</>}
@@ -521,23 +540,47 @@ function UploadForm({ categories, isUploading, setIsUploading, progress, setProg
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
         <div className="lg:col-span-8 space-y-6 md:space-y-8">
           
-          <SectionBlock title="Master File" icon={<Video/>}>
-            <div className={`p-8 md:p-12 border-2 border-dashed rounded-2xl md:rounded-[30px] flex flex-col items-center justify-center transition-all ${isUploading ? 'border-red-600 bg-red-600/5' : 'border-white/10 bg-black/40 hover:border-red-600/50'}`}>
-              {isUploading ? (
-                <div className="text-center space-y-4 w-full max-w-md">
-                  <p className="text-4xl md:text-6xl font-black text-white">{progress}%</p>
-                  <div className="w-full h-2 md:h-3 bg-zinc-900 rounded-full overflow-hidden"><motion.div className="h-full bg-red-600" initial={{width: 0}} animate={{width: `${progress}%`}} /></div>
-                  <p className="font-bold text-red-500 uppercase tracking-widest text-[8px] md:text-[10px]">Processing...</p>
-                </div>
-              ) : (
-                <label className="cursor-pointer text-center group w-full">
-                  <div className="w-16 h-16 md:w-20 md:h-20 bg-zinc-900 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-red-600 transition-colors"><UploadCloud className="w-8 h-8 md:w-10 md:h-10 text-zinc-500 group-hover:text-white transition-colors" /></div>
-                  <p className="text-lg md:text-xl font-black text-white">{videoFile ? videoFile.name : "Select Video"}</p>
-                  <p className="text-[10px] md:text-xs text-zinc-500 mt-2">{videoFile ? `${(videoFile.size/(1024*1024)).toFixed(2)} MB` : "MP4 Highly Recommended"}</p>
-                  <input type="file" className="hidden" onChange={handleVideoFile} accept="video/mp4,video/*" disabled={isUploading} />
-                </label>
-              )}
-            </div>
+          {/* DUAL MODE TOGGLE */}
+          <div className="flex bg-zinc-900 border border-white/5 rounded-xl p-1 w-full shadow-inner">
+            <button onClick={() => setUploadMode("drive")} className={`flex-1 py-3 text-[10px] md:text-xs font-black rounded-lg transition-all uppercase tracking-widest ${uploadMode === "drive" ? "bg-red-600 text-white shadow-lg" : "text-zinc-500 hover:text-white"}`}>Drive Upload</button>
+            <button onClick={() => setUploadMode("link")} className={`flex-1 py-3 text-[10px] md:text-xs font-black rounded-lg transition-all uppercase tracking-widest ${uploadMode === "link" ? "bg-blue-600 text-white shadow-lg" : "text-zinc-500 hover:text-white"}`}>Direct URL Bind</button>
+          </div>
+
+          <SectionBlock title={uploadMode === "drive" ? "Master File (Google Drive)" : "Direct External Stream"} icon={uploadMode === "drive" ? <Video/> : <LinkIcon/>}>
+            {uploadMode === "drive" ? (
+              <div className={`p-8 md:p-12 border-2 border-dashed rounded-2xl md:rounded-[30px] flex flex-col items-center justify-center transition-all ${isUploading ? 'border-red-600 bg-red-600/5' : 'border-white/10 bg-black/40 hover:border-red-600/50'}`}>
+                {isUploading ? (
+                  <div className="text-center space-y-4 w-full max-w-md">
+                    <p className="text-4xl md:text-6xl font-black text-white">{progress}%</p>
+                    <div className="w-full h-2 md:h-3 bg-zinc-900 rounded-full overflow-hidden"><motion.div className="h-full bg-red-600" initial={{width: 0}} animate={{width: `${progress}%`}} /></div>
+                    <p className="font-bold text-red-500 uppercase tracking-widest text-[8px] md:text-[10px]">Processing...</p>
+                  </div>
+                ) : (
+                  <label className="cursor-pointer text-center group w-full">
+                    <div className="w-16 h-16 md:w-20 md:h-20 bg-zinc-900 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-red-600 transition-colors"><UploadCloud className="w-8 h-8 md:w-10 md:h-10 text-zinc-500 group-hover:text-white transition-colors" /></div>
+                    <p className="text-lg md:text-xl font-black text-white">{videoFile ? videoFile.name : "Select Video"}</p>
+                    <p className="text-[10px] md:text-xs text-zinc-500 mt-2">{videoFile ? `${(videoFile.size/(1024*1024)).toFixed(2)} MB` : "MP4 Highly Recommended"}</p>
+                    <input type="file" className="hidden" onChange={handleVideoFile} accept="video/mp4,video/*" disabled={isUploading} />
+                  </label>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-6">
+                 <InputField label="Direct Video Stream URL (.m3u8, .mp4) *" name="videoUrl" value={formData.videoUrl} onChange={handleChange} placeholder="e.g. https://s01.nm-cdn30.top/files/movie/1080p.m3u8" />
+                 
+                 <div className="space-y-1 md:space-y-2 w-full">
+                   <label className="text-[9px] md:text-[10px] font-black text-zinc-500 uppercase tracking-widest">Direct Audio Stream URL (.m3u8) (Optional)</label>
+                   <input className="w-full bg-black/40 border border-white/5 p-3 md:p-4 rounded-xl outline-none focus:border-blue-600 text-sm md:text-base text-white transition-colors" name="audioUrl" value={formData.audioUrl} onChange={handleChange} placeholder="e.g. https://s01.nm-cdn30.top/files/movie/a/0/0.m3u8" />
+                 </div>
+
+                 <div className="p-5 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-start gap-4">
+                   <Info className="w-6 h-6 text-blue-400 shrink-0 mt-0.5" />
+                   <p className="text-xs md:text-sm text-blue-200 font-medium leading-relaxed">
+                     If the CDN separates video and audio, provide BOTH links above. The player will automatically bind them together using a generated Master Playlist.
+                   </p>
+                 </div>
+              </div>
+            )}
           </SectionBlock>
 
           <SectionBlock title="Core Details" icon={<Type/>}>
@@ -564,7 +607,6 @@ function UploadForm({ categories, isUploading, setIsUploading, progress, setProg
             </div>
           </SectionBlock>
 
-          {/* RESTORED: CAST & CREW SECTION */}
           <SectionBlock title="Cast & Crew" icon={<Clapperboard/>}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
               <InputField label="Director" name="director" value={formData.director} onChange={handleChange} placeholder="e.g. Christopher Nolan" />
@@ -575,7 +617,6 @@ function UploadForm({ categories, isUploading, setIsUploading, progress, setProg
             </div>
           </SectionBlock>
 
-          {/* RESTORED: SEO ENGINE SECTION */}
           <SectionBlock title="SEO Engine" icon={<Search/>}>
             <div className="grid grid-cols-1 gap-4 md:gap-6">
               <InputField label="SEO Title" name="seoTitle" value={formData.seoTitle} onChange={handleChange} placeholder="Title for Search Engines" />
@@ -655,7 +696,6 @@ function ToggleSwitch({ label, description, checked, onChange, icon }: any) {
   );
 }
 
-// --- CATEGORY MANAGER ---
 function CategoryManager({ categories, refresh }: any) {
   const [n, setN] = useState("");
   const add = async () => { if(!n) return; await addDoc(collection(db,"categories"), {name:n}); setN(""); refresh(); };

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
+import NetworkStatusToast from "@/components/system/NetworkStatusToast";
 
 export const metadata: Metadata = {
   title: "AURA | Premium Streaming",
@@ -18,6 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="antialiased bg-black text-white">
         <AuthProvider>
           {children}
+          <NetworkStatusToast />
         </AuthProvider>
       </body>
     </html>

@@ -2,10 +2,12 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Bell, Play } from "lucide-react";
+import { Search, Bell, Play, Flame } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import ProfileDropdown from "../dropdowns/ProfileDropdown";
 
 export default function Navbar() {
@@ -17,6 +19,7 @@ export default function Navbar() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [streak, setStreak] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const notifications = [
@@ -29,6 +32,30 @@ export default function Navbar() {
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  useEffect(() => {
+    async function fetchUserStreak() {
+      if (!user) {
+        setStreak(0);
+        return;
+      }
+
+      try {
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          setStreak(userSnap.data().watchStreak || 0);
+        } else {
+          setStreak(0);
+        }
+      } catch (error) {
+        console.error("Failed to fetch watch streak:", error);
+        setStreak(0);
+      }
+    }
+
+    fetchUserStreak();
+  }, [user]);
 
   const toggleSearch = () => {
     if (isSearchOpen && searchQuery.trim() !== "") {
@@ -126,7 +153,13 @@ export default function Navbar() {
           {loading ? (
             <div className="w-8 h-8 rounded-lg bg-zinc-800 animate-pulse" />
           ) : user ? (
-            <ProfileDropdown />
+            <div className="flex items-center gap-3 md:gap-4">
+              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-black/40 border border-white/10 rounded-full backdrop-blur-md shadow-[0_0_15px_rgba(245,158,11,0.15)] cursor-default hover:border-amber-500/50 transition-colors">
+                <Flame className={`w-4 h-4 ${streak > 0 ? "text-amber-500 fill-amber-500" : "text-zinc-600"}`} />
+                <span className="text-xs font-black text-white">{streak}</span>
+              </div>
+              <ProfileDropdown />
+            </div>
           ) : (
             <Link href="/auth" className="flex items-center gap-2 text-xs md:text-sm font-semibold text-white bg-red-700 hover:bg-red-600 px-3 py-1.5 md:px-4 md:py-2 rounded-lg transition-all">
               Sign In

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 // CRITICAL FIX 1: Force high-performance Edge streaming to prevent memory crashes
@@ -48,8 +48,8 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(`\n❌ GOOGLE API ERROR: ${response.status} - ${response.statusText}`);
-      console.error(`❌ GOOGLE EXPLANATION: ${errorBody}\n`);
+      console.error(`\n? GOOGLE API ERROR: ${response.status} - ${response.statusText}`);
+      console.error(`? GOOGLE EXPLANATION: ${errorBody}\n`);
       return new NextResponse("Error fetching video stream from Google Drive", { status: response.status });
     }
 
