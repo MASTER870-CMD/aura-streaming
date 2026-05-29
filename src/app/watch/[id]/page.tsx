@@ -6,7 +6,7 @@ import {
   ThumbsUp, Share2, BookmarkPlus, CheckCircle2, 
   Sparkles, Check, AlertTriangle, ArrowLeft, 
   Home, Film, Bookmark, Play, Pause, Volume2, VolumeX, Maximize, Minimize, Settings,
-  RotateCcw, RotateCw
+  RotateCcw, RotateCw, Loader2, Compass
 } from "lucide-react";
 import { 
   doc, getDoc, updateDoc, increment, collection, getDocs, 
@@ -18,7 +18,7 @@ import { useRouter, useParams } from "next/navigation";
 import Navbar from "@/components/navbar/Navbar";
 import Hls from "hls.js";
 
-// --- HELPER: FORMAT TIME TO HH:MM:SS ---
+// --- HELPER: FORMAT TIME ---
 const formatTime = (timeInSeconds: number) => {
   if (isNaN(timeInSeconds)) return "0:00";
   const h = Math.floor(timeInSeconds / 3600);
@@ -28,9 +28,10 @@ const formatTime = (timeInSeconds: number) => {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 };
 
-// --- PREMIUM SCIFI VIDEO PLAYER COMPONENT ---
-const AuraVideoPlayer = ({ videoSrc, audioSrc, posterSrc, title }: { videoSrc: string, audioSrc?: string, posterSrc?: string, title: string }) => {
+// --- PREMIUM DUAL-STREAM VIDEO PLAYER COMPONENT ---
+const AuraVideoPlayer = ({ videoSrc, audioSrc, posterSrc, title, streamType }: { videoSrc: string, audioSrc?: string, posterSrc?: string, title: string, streamType?: string }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
   const [isPlaying, setIsPlaying] = useState(false);
@@ -49,10 +50,16 @@ const AuraVideoPlayer = ({ videoSrc, audioSrc, posterSrc, title }: { videoSrc: s
   const [skipIndicator, setSkipIndicator] = useState<{ type: 'forward' | 'rewind' | null, id: number }>({ type: null, id: 0 });
   
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const skipTimeoutRef = useRef<NodeJS.Timeout | null>(null); // NEW: Ref for clearing the skip icon
+  const skipTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const isEmbed = streamType === "embed" || (!videoSrc.includes('.m3u8') && !videoSrc.includes('.mp4') && !videoSrc.includes('.webm') && !videoSrc.includes('.ogg'));
+
+  // --- DUAL HLS ENGINE SETUP ---
   useEffect(() => {
+    if (isEmbed) return;
+
     const video = videoRef.current;
+    const audio = audioRef.current;
     if (!video || !videoSrc) return;
 
     setIsPlaying(false);
@@ -61,52 +68,38 @@ const AuraVideoPlayer = ({ videoSrc, audioSrc, posterSrc, title }: { videoSrc: s
     setBuffered(0);
     setCurrentTime("0:00");
 
-    let hlsCleanup: Hls | null = null;
-    let blobUrlCleanup: string | null = null;
+    let hlsVideo: Hls | null = null;
+    let hlsAudio: Hls | null = null;
 
-    if (videoSrc.includes('.m3u8') && Hls.isSupported()) {
-      const hls = new Hls({ 
-        debug: false,
-        enableWorker: true, 
-        lowLatencyMode: true, 
-        maxBufferLength: 10, 
-        maxMaxBufferLength: 30, 
-        maxAudioFramesDrift: 1, 
-        stretchShortVideoTrack: true, 
-      });
-      
-      hlsCleanup = hls;
-
-      if (audioSrc && audioSrc.includes('.m3u8')) {
-        const fakeMasterManifest = `#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",LANGUAGE="en",NAME="Main Audio",DEFAULT=YES,AUTOSELECT=YES,URI="${audioSrc}"
-#EXT-X-STREAM-INF:BANDWIDTH=5000000,CODECS="avc1.4d401f,mp4a.40.2",AUDIO="audio"
-${videoSrc}`;
-
-        const blob = new Blob([fakeMasterManifest], { type: 'application/vnd.apple.mpegurl' });
-        blobUrlCleanup = URL.createObjectURL(blob);
-        hls.loadSource(blobUrlCleanup);
+    if (Hls.isSupported()) {
+      if (videoSrc.includes('.m3u8')) {
+        hlsVideo = new Hls({ maxBufferLength: 30, maxMaxBufferLength: 60 });
+        hlsVideo.loadSource(videoSrc);
+        hlsVideo.attachMedia(video);
       } else {
-        hls.loadSource(videoSrc);
+        video.src = videoSrc;
+        video.load();
       }
 
-      hls.attachMedia(video);
-
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        if (hls.audioTracks && hls.audioTracks.length > 0) hls.audioTrack = 0; 
-      });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl') || !videoSrc.includes('.m3u8')) {
+      if (audioSrc && audioSrc.includes('.m3u8') && audio) {
+        hlsAudio = new Hls({ maxBufferLength: 30, maxMaxBufferLength: 60 });
+        hlsAudio.loadSource(audioSrc);
+        hlsAudio.attachMedia(audio);
+      } else if (audioSrc && audio) {
+        audio.src = audioSrc;
+        audio.load();
+      }
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = videoSrc;
-      video.load();
+      if (audioSrc && audio) audio.src = audioSrc;
     }
 
     return () => {
-      if (hlsCleanup) hlsCleanup.destroy();
-      if (blobUrlCleanup) URL.revokeObjectURL(blobUrlCleanup);
+      if (hlsVideo) hlsVideo.destroy();
+      if (hlsAudio) hlsAudio.destroy();
       if (skipTimeoutRef.current) clearTimeout(skipTimeoutRef.current);
     };
-  }, [videoSrc, audioSrc]);
+  }, [videoSrc, audioSrc, isEmbed]);
 
   const handleMouseMove = () => {
     setShowControls(true);
@@ -123,44 +116,50 @@ ${videoSrc}`;
     if (!isPlaying || isBuffering) setShowControls(true);
   }, [isPlaying, isBuffering]);
 
+  // --- CRITICAL FIX: SECURE PLAY/PAUSE LOGIC WITH AUDIO SYNC ---
   const togglePlay = () => {
     if (videoRef.current) {
       if (isPlaying) {
         videoRef.current.pause();
+        if (audioRef.current) audioRef.current.pause();
         setIsPlaying(false);
       } else {
-        videoRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+        const vPromise = videoRef.current.play();
+        if (vPromise !== undefined) {
+          vPromise.then(() => {
+            setIsPlaying(true);
+            // Attempt to sync audio
+            if (audioRef.current) {
+              audioRef.current.play().catch((err) => {
+                console.warn("Browser blocked background audio autoplay. Muting to proceed.", err);
+                setIsMuted(true);
+                if (videoRef.current) videoRef.current.muted = true;
+                audioRef.current!.muted = true;
+                audioRef.current!.play().catch(() => {});
+              });
+            }
+          }).catch(() => setIsPlaying(false));
+        }
       }
     }
   };
 
-  // --- FIXED: ADDED TIMEOUT TO HIDE SKIP ICON ---
   const handleSkip = (amount: number) => {
     if (videoRef.current) {
       videoRef.current.currentTime += amount;
-      
-      // Trigger the icon
       setSkipIndicator({ type: amount > 0 ? 'forward' : 'rewind', id: Date.now() });
-      
-      // Clear previous timeout if user taps multiple times fast
       if (skipTimeoutRef.current) clearTimeout(skipTimeoutRef.current);
-      
-      // Hide the icon after 800ms
       skipTimeoutRef.current = setTimeout(() => {
         setSkipIndicator({ type: null, id: 0 });
       }, 800);
     }
   };
 
-  const handleVideoAreaClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.detail === 2) {
-      const rect = e.currentTarget.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      if (x < rect.width / 2) handleSkip(-10);
-      else handleSkip(10);
-    } else if (e.detail === 1) {
-      togglePlay();
-    }
+  const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    if (x < rect.width / 2) handleSkip(-10);
+    else handleSkip(10);
   };
 
   const handleTimeUpdate = () => {
@@ -169,6 +168,11 @@ ${videoSrc}`;
       const total = videoRef.current.duration;
       setProgress((current / (total || 1)) * 100);
       setCurrentTime(formatTime(current));
+
+      // Force Audio track to stay perfectly synced with Video frames
+      if (audioRef.current && Math.abs(audioRef.current.currentTime - current) > 0.5) {
+        audioRef.current.currentTime = current;
+      }
     }
   };
 
@@ -187,25 +191,26 @@ ${videoSrc}`;
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const seekTo = parseFloat(e.target.value);
     if (videoRef.current && !isNaN(videoRef.current.duration)) {
-      videoRef.current.currentTime = (videoRef.current.duration / 100) * seekTo;
+      const newTime = (videoRef.current.duration / 100) * seekTo;
+      videoRef.current.currentTime = newTime;
+      if (audioRef.current) audioRef.current.currentTime = newTime;
       setProgress(seekTo);
     }
   };
 
   const toggleMute = () => {
-    if (videoRef.current) {
-      videoRef.current.muted = !isMuted;
-      setIsMuted(!isMuted);
-    }
+    const newMutedState = !isMuted;
+    if (videoRef.current) videoRef.current.muted = newMutedState;
+    if (audioRef.current) audioRef.current.muted = newMutedState;
+    setIsMuted(newMutedState);
   };
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVol = parseFloat(e.target.value);
     setVolume(newVol);
-    if (videoRef.current) {
-      videoRef.current.volume = newVol;
-      setIsMuted(newVol === 0);
-    }
+    setIsMuted(newVol === 0);
+    if (videoRef.current) videoRef.current.volume = newVol;
+    if (audioRef.current) audioRef.current.volume = newVol;
   };
 
   const toggleFullscreen = () => {
@@ -219,6 +224,33 @@ ${videoSrc}`;
     }
   };
 
+  // 🚀 EMBED PLAYER (For third-party iframes)
+  if (isEmbed) {
+    return (
+      <div 
+        ref={containerRef}
+        className="relative w-full aspect-video md:rounded-2xl bg-[#030303] overflow-hidden shadow-[0_0_80px_rgba(34,211,238,0.06)] border-y md:border border-white/5 flex items-center justify-center group"
+      >
+        
+        <iframe
+          src={videoSrc}
+          allowFullScreen
+          sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          className="absolute top-1/2 left-1/2 w-full h-full -translate-x-1/2 -translate-y-1/2 border-0 z-10"
+        ></iframe>
+        
+        <button 
+          onClick={toggleFullscreen} 
+          className="absolute top-8 right-4 z-20 p-2 bg-black/50 hover:bg-black/80 rounded-lg text-white transition-colors opacity-0 group-hover:opacity-100"
+        >
+          {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+        </button>
+      </div>
+    );
+  }
+
+  // --- 100% AD-FREE CUSTOM PLAYER ---
   return (
     <div 
       ref={containerRef}
@@ -228,47 +260,53 @@ ${videoSrc}`;
     >
       <style dangerouslySetInnerHTML={{__html: `
         .youtube-slider::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          height: 14px;
-          width: 14px;
-          border-radius: 50%;
-          background: #ffffff;
-          cursor: pointer;
-          margin-top: -5px;
-          box-shadow: 0 0 10px rgba(34,211,238,0.6);
-          transition: transform 0.1s ease;
+          -webkit-appearance: none; height: 14px; width: 14px; border-radius: 50%;
+          background: #ffffff; cursor: pointer; margin-top: -5px;
+          box-shadow: 0 0 10px rgba(34,211,238,0.6); transition: transform 0.1s ease;
         }
-        .youtube-slider::-webkit-slider-thumb:hover {
-          transform: scale(1.3);
-        }
-        .youtube-slider::-webkit-slider-runnable-track {
-          width: 100%;
-          height: 4px;
-          cursor: pointer;
-          background: transparent;
-          border-radius: 2px;
-        }
+        .youtube-slider::-webkit-slider-thumb:hover { transform: scale(1.3); }
+        .youtube-slider::-webkit-slider-runnable-track { width: 100%; height: 4px; cursor: pointer; background: transparent; border-radius: 2px; }
       `}} />
 
+      {/* LAYER 0: VIDEO */}
       <video
         ref={videoRef}
-        poster={posterSrc}
         onTimeUpdate={handleTimeUpdate}
         onProgress={handleProgressBuffer}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={() => setIsPlaying(false)}
-        onWaiting={() => setIsBuffering(true)}
-        onPlaying={() => { setIsBuffering(false); setIsPlaying(true); }}
+        onWaiting={() => { setIsBuffering(true); audioRef.current?.pause(); }}
+        onPlaying={() => { setIsBuffering(false); setIsPlaying(true); audioRef.current?.play().catch(()=>{}); }}
         onCanPlay={() => setIsBuffering(false)}
-        className="w-full h-full object-contain relative z-0"
+        crossOrigin="anonymous"
+        className="absolute top-1/2 left-1/2 w-full h-full -translate-x-1/2 -translate-y-1/2 object-contain z-0 pointer-events-none"
         playsInline
       />
 
+      {/* LAYER 0.5: AUDIO */}
+      <audio ref={audioRef} className="hidden" playsInline crossOrigin="anonymous" />
+
+      {/* LAYER 1: CLICK INTERCEPTOR (Handles Play/Pause without blocking controls) */}
       <div 
-        className="absolute inset-0 z-10 cursor-pointer"
-        onClick={handleVideoAreaClick}
+        className="absolute inset-0 z-10 cursor-pointer" 
+        onClick={togglePlay} 
+        onDoubleClick={handleDoubleClick}
       />
 
+      {/* LAYER 2: BIG PLAY BUTTON */}
+      <AnimatePresence>
+        {!isPlaying && progress === 0 && (
+          <motion.div exit={{ opacity: 0, scale: 0.8 }} className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none bg-black/40 backdrop-blur-sm">
+            {posterSrc && <img src={posterSrc} alt={title} className="absolute inset-0 w-full h-full object-cover opacity-60 filter blur-[4px] -z-10" />}
+            <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-transparent to-[#050505]/50 -z-10" />
+            <div className="w-20 h-20 bg-cyan-600/90 rounded-full flex items-center justify-center shadow-[0_0_40px_rgba(8,145,178,0.8)] border border-cyan-400/50 pl-1.5 transition-transform group-hover:scale-110">
+               <Play className="w-10 h-10 text-white fill-white" />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* SKIP INDICATORS */}
       <AnimatePresence>
         {skipIndicator.type === 'rewind' && (
           <motion.div key={`rewind-${skipIndicator.id}`} initial={{ opacity: 0, scale: 0.8, x: -20 }} animate={{ opacity: 1, scale: 1, x: 0 }} exit={{ opacity: 0, scale: 1.2 }} className="absolute left-[15%] top-1/2 -translate-y-1/2 z-20 flex flex-col items-center bg-black/40 p-4 rounded-full backdrop-blur-md pointer-events-none text-cyan-400">
@@ -284,17 +322,8 @@ ${videoSrc}`;
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {!isPlaying && progress === 0 && (
-          <motion.div exit={{ opacity: 0 }} className="absolute inset-0 z-0 pointer-events-none bg-black">
-            {posterSrc && <img src={posterSrc} alt={title} className="w-full h-full object-cover opacity-60 filter blur-[2px]" />}
-            <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-transparent to-[#050505]/50" />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       <div className="absolute top-4 left-4 z-20 pointer-events-none opacity-40">
-         <span className="text-white text-[10px] font-black tracking-widest">AURA SYSTEM PRO</span>
+         <span className="text-white text-[10px] font-black tracking-widest drop-shadow-md">AURA SYSTEM PRO</span>
       </div>
 
       <AnimatePresence>
@@ -309,9 +338,12 @@ ${videoSrc}`;
         )}
       </AnimatePresence>
 
-      <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black via-black/90 to-transparent pt-16 pb-4 px-4 md:px-6 transition-opacity duration-300 z-30 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
-        
-        <div className="flex items-center gap-3 mb-4 z-40 relative group/progress">
+      {/* LAYER 3: CONTROL BAR (CRITICAL FIX: pointer-events-auto and e.stopPropagation ensure laptop clicks work flawlessly) */}
+      <div 
+        className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black via-black/90 to-transparent pt-20 pb-4 px-4 md:px-6 transition-opacity duration-300 z-50 ${showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        onClick={(e) => e.stopPropagation()} 
+      >
+        <div className="flex items-center gap-3 mb-4 relative group/progress">
           <input 
             type="range" min="0" max="100" step="0.1" 
             value={progress || 0} onChange={handleSeek}
@@ -322,14 +354,14 @@ ${videoSrc}`;
           />
         </div>
 
-        <div className="flex items-center justify-between text-white relative z-40">
+        <div className="flex items-center justify-between text-white relative">
           <div className="flex items-center gap-5">
-            <button onClick={togglePlay} className="hover:text-cyan-400 transition-colors">
+            <button onClick={togglePlay} className="hover:text-cyan-400 transition-colors cursor-pointer">
               {isPlaying ? <Pause className="w-5 h-5" fill="currentColor" /> : <Play className="w-5 h-5" fill="currentColor" />}
             </button>
             
             <div className="flex items-center gap-2 group/vol">
-              <button onClick={toggleMute} className="hover:text-cyan-400 transition-colors">
+              <button onClick={toggleMute} className="hover:text-cyan-400 transition-colors cursor-pointer">
                 {isMuted || volume === 0 ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
               </button>
               <input 
@@ -347,14 +379,14 @@ ${videoSrc}`;
 
           <div className="flex items-center gap-5">
             <div className="relative">
-              <button onClick={() => setShowSettings(!showSettings)} className={`hover:text-cyan-400 transition-colors ${showSettings ? 'text-cyan-400' : ''}`}>
+              <button onClick={() => setShowSettings(!showSettings)} className={`hover:text-cyan-400 transition-colors cursor-pointer ${showSettings ? 'text-cyan-400' : ''}`}>
                 <Settings className="w-4 h-4 md:w-5 h-5" />
               </button>
               <AnimatePresence>
                 {showSettings && (
                   <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 5 }} className="absolute bottom-8 right-0 w-28 bg-[#0a0a0a] border border-white/10 rounded-xl overflow-hidden shadow-2xl flex flex-col z-50">
                     {["1080p", "720p", "Auto"].map((q) => (
-                      <button key={q} onClick={() => { setActiveQuality(q); setShowSettings(false); }} className="px-3 py-2 text-left text-xs font-bold hover:bg-zinc-900 transition-colors flex items-center justify-between">
+                      <button key={q} onClick={() => { setActiveQuality(q); setShowSettings(false); }} className="px-3 py-2 text-left text-xs font-bold hover:bg-zinc-900 transition-colors flex items-center justify-between cursor-pointer">
                         <span className={activeQuality === q ? "text-cyan-400" : "text-zinc-400"}>{q}</span>
                         {activeQuality === q && <Check className="w-3 h-3 text-cyan-400" />}
                       </button>
@@ -364,7 +396,7 @@ ${videoSrc}`;
               </AnimatePresence>
             </div>
 
-            <button onClick={toggleFullscreen} className="hover:text-cyan-400 transition-colors">
+            <button onClick={toggleFullscreen} className="hover:text-cyan-400 transition-colors cursor-pointer">
               {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
             </button>
           </div>
@@ -538,7 +570,6 @@ export default function WatchPage() {
   }
 
   const hasUserLiked = movie.likedBy?.includes(user?.uid);
-  const directStreamSource = movie.driveId ? `/api/stream/${movie.driveId}` : movie.videoUrl;
 
   return (
     <div className="min-h-screen w-full bg-[#050505] text-zinc-100 font-sans pb-24 md:pb-12 overflow-x-hidden selection:bg-cyan-950 selection:text-white">
@@ -547,12 +578,36 @@ export default function WatchPage() {
       <main className="max-w-[1780px] mx-auto w-full pt-20 md:pt-24 flex flex-col xl:flex-row gap-6 lg:gap-8 px-0 md:px-6 lg:px-8">
         <div className="flex-1 w-full min-w-0 flex flex-col">
           
-          <AuraVideoPlayer 
-            videoSrc={directStreamSource} 
-            audioSrc={movie.audioUrl}
-            posterSrc={movie.banner || movie.poster} 
-            title={movie.title} 
-          />
+          {movie.videoUrl ? (
+            <AuraVideoPlayer 
+              videoSrc={movie.videoUrl} 
+              audioSrc={movie.audioUrl}
+              posterSrc={movie.banner || movie.poster} 
+              title={movie.title}
+              streamType={movie.streamType} 
+            />
+          ) : movie.driveId && movie.driveId !== "uploaded_id" ? (
+            <div className="relative w-full aspect-video md:rounded-2xl overflow-hidden bg-black md:border border-y md:border-white/5 md:shadow-[0_0_80px_rgba(34,211,238,0.06)] z-20" onContextMenu={(e) => e.preventDefault()}>
+               <iframe 
+                  src={`https://drive.google.com/file/d/${movie.driveId}/preview`}
+                  className="absolute top-1/2 left-1/2 w-full h-full -translate-x-1/2 -translate-y-1/2 scale-[1.01] border-none z-10"
+                  allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                  allowFullScreen
+                />
+                
+                {/* INVISIBLE SHIELD: Blocks Google Drive's Pop-out icon */}
+                <div className="absolute top-0 right-0 w-24 h-16 bg-black z-30 pointer-events-auto" title="Aura Secure Stream"></div>
+                
+                <div className="absolute top-2 left-3 md:top-4 md:left-4 z-30 pointer-events-none opacity-50 md:group-hover:opacity-100 transition-opacity">
+                   <span className="text-white text-[10px] md:text-xs font-black tracking-widest drop-shadow-md">AURA<span className="text-cyan-400">.</span></span>
+                </div>
+            </div>
+          ) : (
+            <div className="relative w-full aspect-video md:rounded-2xl bg-[#030303] flex flex-col items-center justify-center border-y md:border border-white/5">
+              <Loader2 className="w-8 h-8 animate-spin text-red-600 mb-2" />
+              <p className="text-zinc-500 font-bold uppercase tracking-widest text-xs">Processing Master File...</p>
+            </div>
+          )}
 
           <div className="px-4 md:px-0 mt-6 space-y-6">
             <div className="flex flex-col gap-3">

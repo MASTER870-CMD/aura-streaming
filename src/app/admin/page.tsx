@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Film, UploadCloud, Tags, Users, Menu,
   Trash2, Eye, Clock, Image as ImageIcon, Loader2, AlertCircle, 
   Video, Plus, X, Type, Clapperboard, MonitorPlay, Search, Star, Zap, Edit,
-  Link as LinkIcon, Info
+  Link as LinkIcon, Info, Code
 } from "lucide-react";
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, serverTimestamp, query, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -157,7 +157,7 @@ function MoviesTable({ movies, refresh, categories }: any) {
   };
 
   const del = async (m: any) => {
-    if(confirm(`WARNING: This will permanently delete '${m.title}' from your Database AND Google Drive. This cannot be undone. Continue?`)) {
+    if(confirm(`WARNING: This will permanently delete '${m.title}' from your Database AND Google Drive (if applicable). This cannot be undone. Continue?`)) {
       try {
         if (m.driveId && m.driveId !== "uploaded_id") {
           await fetch(`/api/upload?driveId=${m.driveId}`, { method: 'DELETE' });
@@ -219,7 +219,9 @@ function MoviesTable({ movies, refresh, categories }: any) {
                   <div>
                     <p className="font-bold text-white">{m.title}</p>
                     <p className="text-xs text-zinc-500 mt-1">{m.releaseYear} • {m.duration || "N/A"}</p>
-                    {m.videoUrl && <span className="text-[9px] text-blue-400 mt-1 block">External Link</span>}
+                    {m.streamType === "embed" && <span className="text-[9px] text-purple-400 font-bold mt-1 block uppercase">AnonMP4 Embed</span>}
+                    {m.streamType === "link" && <span className="text-[9px] text-blue-400 font-bold mt-1 block uppercase">Direct External Link</span>}
+                    {(m.streamType === "drive" || !m.streamType) && <span className="text-[9px] text-red-400 font-bold mt-1 block uppercase">Google Drive</span>}
                   </div>
                 </td>
                 <td className="p-6"><span className="px-3 py-1 bg-zinc-900 border border-white/5 rounded-full text-xs text-zinc-300">{m.category}</span></td>
@@ -268,14 +270,27 @@ function MoviesTable({ movies, refresh, categories }: any) {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Direct Video Stream URL</label>
-                  <input name="videoUrl" value={editingMovie.videoUrl || ""} onChange={handleEditChange} placeholder="e.g. https://s01.../1080p/1080p.m3u8" className="w-full bg-black/50 border border-white/10 p-3 rounded-lg text-sm text-white outline-none focus:border-blue-500" />
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Stream Source Type</label>
+                  <select name="streamType" value={editingMovie.streamType || "drive"} onChange={handleEditChange} className="w-full bg-black/50 border border-white/10 p-3 rounded-lg text-sm text-white outline-none focus:border-red-500">
+                    <option value="drive">Google Drive API</option>
+                    <option value="link">Direct External URL (.m3u8 / .mp4)</option>
+                    <option value="embed">AnonMP4 Iframe Embed</option>
+                  </select>
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Direct Audio Stream URL (Optional)</label>
-                  <input name="audioUrl" value={editingMovie.audioUrl || ""} onChange={handleEditChange} placeholder="e.g. https://s01.../a/0/0.m3u8" className="w-full bg-black/50 border border-white/10 p-3 rounded-lg text-sm text-white outline-none focus:border-blue-500" />
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                    {editingMovie.streamType === "embed" ? "AnonMP4 Embed URL" : "Video URL / Drive Fallback"}
+                  </label>
+                  <input name="videoUrl" value={editingMovie.videoUrl || ""} onChange={handleEditChange} placeholder="Enter URL here..." className="w-full bg-black/50 border border-white/10 p-3 rounded-lg text-sm text-white outline-none focus:border-blue-500" />
                 </div>
+
+                {editingMovie.streamType === "link" && (
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Direct Audio Stream URL (Optional)</label>
+                    <input name="audioUrl" value={editingMovie.audioUrl || ""} onChange={handleEditChange} placeholder="e.g. https://s01.../a/0/0.m3u8" className="w-full bg-black/50 border border-white/10 p-3 rounded-lg text-sm text-white outline-none focus:border-blue-500" />
+                  </div>
+                )}
 
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Short Description</label>
@@ -412,8 +427,8 @@ function UsersTable({ users, refresh }: any) {
 }
 
 function UploadForm({ categories, isUploading, setIsUploading, progress, setProgress, error, setError, onSuccess }: any) {
-  // CRITICAL FEATURE: DUAL UPLOAD MODE
-  const [uploadMode, setUploadMode] = useState<"drive" | "link">("drive");
+  // CRITICAL FEATURE: TRI-MODE UPLOAD (Drive, Link, Embed)
+  const [uploadMode, setUploadMode] = useState<"drive" | "link" | "embed">("drive");
   
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [poster, setPoster] = useState<string>("");
@@ -454,6 +469,7 @@ function UploadForm({ categories, isUploading, setIsUploading, progress, setProg
   const upload = async () => {
     if (uploadMode === "drive" && !videoFile) return setError("Please select a video file for Drive upload.");
     if (uploadMode === "link" && !formData.videoUrl) return setError("Please provide a direct external video URL.");
+    if (uploadMode === "embed" && !formData.videoUrl) return setError("Please provide an AnonMP4 embed URL.");
     if (!formData.title || !poster || !formData.category) return setError("Missing required fields (Title, Category, Poster).");
 
     setIsUploading(true); setProgress(0); setError(null);
@@ -461,7 +477,6 @@ function UploadForm({ categories, isUploading, setIsUploading, progress, setProg
     try {
       let finalDriveId = null;
 
-      // MODE 1: HEAVY GOOGLE DRIVE UPLOAD
       if (uploadMode === "drive") {
         const initRes = await fetch("/api/upload", {
           method: "POST",
@@ -503,12 +518,13 @@ function UploadForm({ categories, isUploading, setIsUploading, progress, setProg
         finalDriveId = driveResponseData?.id || "uploaded_id";
       }
 
-      // MODE 2: INSTANT LINK SAVE (Works for both Drive and Link modes)
+      // Save to Firestore, appending streamType so the frontend knows how to render it
       await addDoc(collection(db, "movies"), { 
         ...formData, 
-        driveId: finalDriveId, // Will be null if using external link
-        videoUrl: uploadMode === "link" ? formData.videoUrl : null,
-        audioUrl: uploadMode === "link" ? formData.audioUrl : null, // Added the new audio field!
+        driveId: finalDriveId, 
+        videoUrl: (uploadMode === "link" || uploadMode === "embed") ? formData.videoUrl : null,
+        audioUrl: uploadMode === "link" ? formData.audioUrl : null,
+        streamType: uploadMode, // Critical: 'drive', 'link', or 'embed'
         poster, 
         banner: banner || poster, 
         status: "Published", 
@@ -540,13 +556,14 @@ function UploadForm({ categories, isUploading, setIsUploading, progress, setProg
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
         <div className="lg:col-span-8 space-y-6 md:space-y-8">
           
-          {/* DUAL MODE TOGGLE */}
-          <div className="flex bg-zinc-900 border border-white/5 rounded-xl p-1 w-full shadow-inner">
+          {/* TRI-MODE TOGGLE */}
+          <div className="flex bg-zinc-900 border border-white/5 rounded-xl p-1 w-full shadow-inner flex-col md:flex-row">
             <button onClick={() => setUploadMode("drive")} className={`flex-1 py-3 text-[10px] md:text-xs font-black rounded-lg transition-all uppercase tracking-widest ${uploadMode === "drive" ? "bg-red-600 text-white shadow-lg" : "text-zinc-500 hover:text-white"}`}>Drive Upload</button>
-            <button onClick={() => setUploadMode("link")} className={`flex-1 py-3 text-[10px] md:text-xs font-black rounded-lg transition-all uppercase tracking-widest ${uploadMode === "link" ? "bg-blue-600 text-white shadow-lg" : "text-zinc-500 hover:text-white"}`}>Direct URL Bind</button>
+            <button onClick={() => setUploadMode("link")} className={`flex-1 py-3 text-[10px] md:text-xs font-black rounded-lg transition-all uppercase tracking-widest ${uploadMode === "link" ? "bg-blue-600 text-white shadow-lg" : "text-zinc-500 hover:text-white"}`}>Direct Link</button>
+            <button onClick={() => setUploadMode("embed")} className={`flex-1 py-3 text-[10px] md:text-xs font-black rounded-lg transition-all uppercase tracking-widest ${uploadMode === "embed" ? "bg-purple-600 text-white shadow-lg" : "text-zinc-500 hover:text-white"}`}>AnonMP4 Embed</button>
           </div>
 
-          <SectionBlock title={uploadMode === "drive" ? "Master File (Google Drive)" : "Direct External Stream"} icon={uploadMode === "drive" ? <Video/> : <LinkIcon/>}>
+          <SectionBlock title={uploadMode === "drive" ? "Master File (Google Drive)" : uploadMode === "embed" ? "AnonMP4 Iframe Embed" : "Direct External Stream"} icon={uploadMode === "drive" ? <Video/> : uploadMode === "embed" ? <Code/> : <LinkIcon/>}>
             {uploadMode === "drive" ? (
               <div className={`p-8 md:p-12 border-2 border-dashed rounded-2xl md:rounded-[30px] flex flex-col items-center justify-center transition-all ${isUploading ? 'border-red-600 bg-red-600/5' : 'border-white/10 bg-black/40 hover:border-red-600/50'}`}>
                 {isUploading ? (
@@ -564,7 +581,7 @@ function UploadForm({ categories, isUploading, setIsUploading, progress, setProg
                   </label>
                 )}
               </div>
-            ) : (
+            ) : uploadMode === "link" ? (
               <div className="space-y-6">
                  <InputField label="Direct Video Stream URL (.m3u8, .mp4) *" name="videoUrl" value={formData.videoUrl} onChange={handleChange} placeholder="e.g. https://s01.nm-cdn30.top/files/movie/1080p.m3u8" />
                  
@@ -577,6 +594,17 @@ function UploadForm({ categories, isUploading, setIsUploading, progress, setProg
                    <Info className="w-6 h-6 text-blue-400 shrink-0 mt-0.5" />
                    <p className="text-xs md:text-sm text-blue-200 font-medium leading-relaxed">
                      If the CDN separates video and audio, provide BOTH links above. The player will automatically bind them together using a generated Master Playlist.
+                   </p>
+                 </div>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                 <InputField label="AnonMP4 Embed URL *" name="videoUrl" value={formData.videoUrl} onChange={handleChange} placeholder="e.g. https://anonmp4.com/e/XXXXXX" />
+                 
+                 <div className="p-5 bg-purple-500/10 border border-purple-500/20 rounded-xl flex items-start gap-4">
+                   <Code className="w-6 h-6 text-purple-400 shrink-0 mt-0.5" />
+                   <p className="text-xs md:text-sm text-purple-200 font-medium leading-relaxed">
+                     By selecting this option, the frontend will automatically swap your custom video player for an <b>iframe</b> embed. This bypasses all bandwidth and auth issues.
                    </p>
                  </div>
               </div>
